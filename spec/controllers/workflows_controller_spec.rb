@@ -11,6 +11,14 @@ RSpec.describe RubyLLM::Agents::WorkflowsController, type: :controller do
       super
       head :ok unless performed?
     end
+
+    def run
+      super
+    end
+
+    def execute
+      super
+    end
   end
 
   describe "GET #show" do
@@ -18,32 +26,31 @@ RSpec.describe RubyLLM::Agents::WorkflowsController, type: :controller do
       create(:execution,
         agent_type: "TestPipelineWorkflow",
         workflow_type: "pipeline",
-        status: "success"
-      )
+        status: "success")
     end
 
     it "returns http success" do
-      get :show, params: { id: "TestPipelineWorkflow" }
+      get :show, params: {id: "TestPipelineWorkflow"}
       expect(response).to have_http_status(:success)
     end
 
     it "assigns @workflow_type" do
-      get :show, params: { id: "TestPipelineWorkflow" }
+      get :show, params: {id: "TestPipelineWorkflow"}
       expect(assigns(:workflow_type)).to eq("TestPipelineWorkflow")
     end
 
     it "assigns @workflow_type_kind from execution history" do
-      get :show, params: { id: "TestPipelineWorkflow" }
+      get :show, params: {id: "TestPipelineWorkflow"}
       expect(assigns(:workflow_type_kind)).to eq("pipeline")
     end
 
     it "assigns @stats" do
-      get :show, params: { id: "TestPipelineWorkflow" }
+      get :show, params: {id: "TestPipelineWorkflow"}
       expect(assigns(:stats)).to be_a(Hash)
     end
 
     it "assigns @executions" do
-      get :show, params: { id: "TestPipelineWorkflow" }
+      get :show, params: {id: "TestPipelineWorkflow"}
       expect(assigns(:executions)).to be_present
     end
 
@@ -51,25 +58,23 @@ RSpec.describe RubyLLM::Agents::WorkflowsController, type: :controller do
       let!(:parallel_execution) do
         create(:execution,
           agent_type: "TestParallelWorkflow",
-          workflow_type: "parallel"
-        )
+          workflow_type: "parallel")
       end
 
       let!(:router_execution) do
         create(:execution,
           agent_type: "TestRouterWorkflow",
           workflow_type: "router",
-          routed_to: "billing"
-        )
+          routed_to: "billing")
       end
 
       it "detects parallel workflow type" do
-        get :show, params: { id: "TestParallelWorkflow" }
+        get :show, params: {id: "TestParallelWorkflow"}
         expect(assigns(:workflow_type_kind)).to eq("parallel")
       end
 
       it "detects router workflow type" do
-        get :show, params: { id: "TestRouterWorkflow" }
+        get :show, params: {id: "TestRouterWorkflow"}
         expect(assigns(:workflow_type_kind)).to eq("router")
       end
     end
@@ -79,8 +84,7 @@ RSpec.describe RubyLLM::Agents::WorkflowsController, type: :controller do
         create(:execution,
           agent_type: "TestPipelineWorkflow",
           workflow_type: "pipeline",
-          status: "success"
-        )
+          status: "success")
       end
 
       let!(:child_execution) do
@@ -91,12 +95,11 @@ RSpec.describe RubyLLM::Agents::WorkflowsController, type: :controller do
           status: "success",
           duration_ms: 500,
           total_cost: 0.01,
-          total_tokens: 100
-        )
+          total_tokens: 100)
       end
 
       it "calculates step stats from child executions" do
-        get :show, params: { id: "TestPipelineWorkflow" }
+        get :show, params: {id: "TestPipelineWorkflow"}
         expect(assigns(:step_stats)).to be_an(Array)
       end
     end
@@ -107,24 +110,21 @@ RSpec.describe RubyLLM::Agents::WorkflowsController, type: :controller do
           agent_type: "TestRouterWorkflow",
           workflow_type: "router",
           routed_to: "billing",
-          status: "success"
-        )
+          status: "success")
         create(:execution,
           agent_type: "TestRouterWorkflow",
           workflow_type: "router",
           routed_to: "billing",
-          status: "success"
-        )
+          status: "success")
         create(:execution,
           agent_type: "TestRouterWorkflow",
           workflow_type: "router",
           routed_to: "technical",
-          status: "success"
-        )
+          status: "success")
       end
 
       it "calculates route distribution for router workflows" do
-        get :show, params: { id: "TestRouterWorkflow" }
+        get :show, params: {id: "TestRouterWorkflow"}
         expect(assigns(:route_distribution)).to be_a(Hash)
         expect(assigns(:route_distribution).keys).to include("billing")
       end
@@ -135,17 +135,15 @@ RSpec.describe RubyLLM::Agents::WorkflowsController, type: :controller do
         create(:execution,
           agent_type: "TestPipelineWorkflow",
           workflow_type: "pipeline",
-          status: "success"
-        )
+          status: "success")
         create(:execution,
           agent_type: "TestPipelineWorkflow",
           workflow_type: "pipeline",
-          status: "error"
-        )
+          status: "error")
       end
 
       it "filters by valid status" do
-        get :show, params: { id: "TestPipelineWorkflow", statuses: "success" }
+        get :show, params: {id: "TestPipelineWorkflow", statuses: "success"}
         expect(assigns(:executions).pluck(:status).uniq).to eq(["success"])
       end
     end
@@ -155,17 +153,15 @@ RSpec.describe RubyLLM::Agents::WorkflowsController, type: :controller do
         create(:execution,
           agent_type: "TestPipelineWorkflow",
           workflow_type: "pipeline",
-          created_at: Time.current
-        )
+          created_at: Time.current)
         create(:execution,
           agent_type: "TestPipelineWorkflow",
           workflow_type: "pipeline",
-          created_at: 10.days.ago
-        )
+          created_at: 10.days.ago)
       end
 
       it "filters by positive days" do
-        get :show, params: { id: "TestPipelineWorkflow", days: "7" }
+        get :show, params: {id: "TestPipelineWorkflow", days: "7"}
         # 2 recent executions: 1 from let! + 1 from before block
         expect(assigns(:executions).count).to eq(2)
       end
@@ -175,18 +171,17 @@ RSpec.describe RubyLLM::Agents::WorkflowsController, type: :controller do
       before do
         create_list(:execution, 30,
           agent_type: "TestPipelineWorkflow",
-          workflow_type: "pipeline"
-        )
+          workflow_type: "pipeline")
       end
 
       it "paginates results" do
-        get :show, params: { id: "TestPipelineWorkflow" }
+        get :show, params: {id: "TestPipelineWorkflow"}
         expect(assigns(:executions).count).to eq(25)
         expect(assigns(:pagination)[:total_pages]).to eq(2)
       end
 
       it "handles page parameter" do
-        get :show, params: { id: "TestPipelineWorkflow", page: "2" }
+        get :show, params: {id: "TestPipelineWorkflow", page: "2"}
         expect(assigns(:pagination)[:current_page]).to eq(2)
       end
     end
@@ -198,10 +193,13 @@ RSpec.describe RubyLLM::Agents::WorkflowsController, type: :controller do
       end
 
       it "redirects with error message" do
-        get :show, params: { id: "TestPipelineWorkflow" }
+        get :show, params: {id: "TestPipelineWorkflow"}
         expect(response).to redirect_to(controller.ruby_llm_agents.agents_path)
         expect(flash[:alert]).to eq("Error loading workflow details")
       end
     end
   end
+
+  # NOTE: GET #run and POST #execute tests are in spec/requests/workflows_run_execute_spec.rb
+  # because anonymous controller routing doesn't support member routes.
 end

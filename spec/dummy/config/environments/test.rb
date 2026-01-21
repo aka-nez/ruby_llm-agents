@@ -11,6 +11,9 @@ Rails.application.configure do
   config.action_controller.perform_caching = false
   config.cache_store = :null_store
 
+  # Disable CSRF protection for tests
+  config.action_controller.allow_forgery_protection = false
+
   # Raise exceptions instead of rendering exception templates
   config.action_dispatch.show_exceptions = :none
 

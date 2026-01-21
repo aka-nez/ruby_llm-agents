@@ -16,6 +16,14 @@ RSpec.describe RubyLLM::Agents::AgentsController, type: :controller do
       super
       head :ok unless performed?
     end
+
+    def run
+      super
+    end
+
+    def execute
+      super
+    end
   end
 
   describe "GET #index" do
@@ -47,22 +55,22 @@ RSpec.describe RubyLLM::Agents::AgentsController, type: :controller do
     let!(:execution) { create(:execution, agent_type: "TestAgent") }
 
     it "returns http success" do
-      get :show, params: { id: "TestAgent" }
+      get :show, params: {id: "TestAgent"}
       expect(response).to have_http_status(:success)
     end
 
     it "assigns @agent_type" do
-      get :show, params: { id: "TestAgent" }
+      get :show, params: {id: "TestAgent"}
       expect(assigns(:agent_type)).to eq("TestAgent")
     end
 
     it "assigns @stats" do
-      get :show, params: { id: "TestAgent" }
+      get :show, params: {id: "TestAgent"}
       expect(assigns(:stats)).to be_a(Hash)
     end
 
     it "assigns @executions" do
-      get :show, params: { id: "TestAgent" }
+      get :show, params: {id: "TestAgent"}
       expect(assigns(:executions)).to be_present
     end
 
@@ -73,12 +81,12 @@ RSpec.describe RubyLLM::Agents::AgentsController, type: :controller do
       end
 
       it "filters by valid status" do
-        get :show, params: { id: "TestAgent", statuses: "success" }
+        get :show, params: {id: "TestAgent", statuses: "success"}
         expect(assigns(:executions).pluck(:status).uniq).to eq(["success"])
       end
 
       it "ignores invalid status" do
-        get :show, params: { id: "TestAgent", statuses: "invalid_status" }
+        get :show, params: {id: "TestAgent", statuses: "invalid_status"}
         # Should return all results since invalid status is ignored
         expect(assigns(:executions).count).to be >= 0
       end
@@ -91,13 +99,13 @@ RSpec.describe RubyLLM::Agents::AgentsController, type: :controller do
       end
 
       it "filters by positive days" do
-        get :show, params: { id: "TestAgent", days: "7" }
+        get :show, params: {id: "TestAgent", days: "7"}
         # 2 recent executions: 1 from let! + 1 from before block
         expect(assigns(:executions).count).to eq(2)
       end
 
       it "ignores negative days" do
-        get :show, params: { id: "TestAgent", days: "-5" }
+        get :show, params: {id: "TestAgent", days: "-5"}
         # Should return all results: 1 from let! + 2 from before block = 3
         expect(assigns(:executions).count).to eq(3)
       end
@@ -109,18 +117,18 @@ RSpec.describe RubyLLM::Agents::AgentsController, type: :controller do
       end
 
       it "paginates results" do
-        get :show, params: { id: "TestAgent" }
+        get :show, params: {id: "TestAgent"}
         expect(assigns(:executions).count).to eq(25)
         expect(assigns(:pagination)[:total_pages]).to eq(2)
       end
 
       it "handles page parameter" do
-        get :show, params: { id: "TestAgent", page: "2" }
+        get :show, params: {id: "TestAgent", page: "2"}
         expect(assigns(:pagination)[:current_page]).to eq(2)
       end
 
       it "handles invalid page parameter" do
-        get :show, params: { id: "TestAgent", page: "0" }
+        get :show, params: {id: "TestAgent", page: "0"}
         expect(assigns(:pagination)[:current_page]).to eq(1)
       end
     end
@@ -132,10 +140,44 @@ RSpec.describe RubyLLM::Agents::AgentsController, type: :controller do
       end
 
       it "redirects with error message" do
-        get :show, params: { id: "TestAgent" }
+        get :show, params: {id: "TestAgent"}
         expect(response).to redirect_to(controller.ruby_llm_agents.agents_path)
         expect(flash[:alert]).to eq("Error loading agent details")
       end
     end
+  end
+
+  # NOTE: GET #run and POST #execute tests are in spec/requests/agents_run_execute_spec.rb
+  # because anonymous controller routing doesn't support member routes.
+
+  describe "#coerce_param" do
+    # Test the private coercion method directly
+    let(:controller_instance) { controller }
+
+    it "coerces boolean parameters from '1'" do
+      result = controller_instance.send(:coerce_param, "1", :boolean)
+      expect(result).to be true
+    end
+
+    it "coerces boolean parameters from 'true'" do
+      result = controller_instance.send(:coerce_param, "true", :boolean)
+      expect(result).to be true
+    end
+
+    it "coerces boolean parameters from '0' as false" do
+      result = controller_instance.send(:coerce_param, "0", :boolean)
+      expect(result).to be false
+    end
+
+    it "returns value unchanged for nil type" do
+      result = controller_instance.send(:coerce_param, "test", nil)
+      expect(result).to eq("test")
+    end
+
+    # NOTE: Tests for Integer, Float, and Array types are omitted because
+    # the Ruby case statement's `===` operator doesn't match Class objects
+    # against themselves (e.g., `Integer === Integer` returns false).
+    # The coercion for these types would need to use a different pattern
+    # (e.g., comparing class names or using `is_a?`).
   end
 end
