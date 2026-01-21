@@ -1,0 +1,295 @@
+<%# Run Workflow Modal - Alpine.js component for executing workflows with custom parameters %>
+<div
+  x-data="runWorkflowModal('<%= ruby_llm_agents.run_workflow_path(@workflow_type, format: :json) %>', '<%= ruby_llm_agents.execute_workflow_path(@workflow_type) %>')"
+  x-show="isOpen"
+  x-cloak
+  @keydown.escape.window="close()"
+  class="fixed inset-0 z-50 overflow-y-auto"
+>
+  <!-- Backdrop -->
+  <div
+    class="fixed inset-0 bg-gray-500/75 dark:bg-gray-900/75 transition-opacity"
+    @click="close()"
+  ></div>
+
+  <!-- Modal -->
+  <div class="relative min-h-screen flex items-center justify-center p-4">
+    <div
+      class="relative bg-white dark:bg-gray-800 rounded-xl shadow-xl max-w-lg w-full transform transition-all"
+      @click.stop
+    >
+      <!-- Header -->
+      <div class="flex items-center justify-between px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+        <div class="flex items-center gap-3">
+          <div class="flex items-center justify-center w-10 h-10 rounded-full bg-indigo-100 dark:bg-indigo-900/30">
+            <svg class="w-5 h-5 text-indigo-600 dark:text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/>
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+            </svg>
+          </div>
+          <div>
+            <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100">Run Workflow</h3>
+            <p class="text-sm text-gray-500 dark:text-gray-400" x-text="workflowName || 'Loading...'"></p>
+          </div>
+        </div>
+        <button
+          type="button"
+          @click="close()"
+          class="text-gray-400 hover:text-gray-500 dark:hover:text-gray-300 transition-colors"
+        >
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+          </svg>
+        </button>
+      </div>
+
+      <!-- Loading State -->
+      <div x-show="loading" class="px-6 py-12 text-center">
+        <svg class="animate-spin h-8 w-8 mx-auto text-indigo-500" fill="none" viewBox="0 0 24 24">
+          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+        </svg>
+        <p class="mt-3 text-sm text-gray-500 dark:text-gray-400">Loading workflow configuration...</p>
+      </div>
+
+      <!-- Error State -->
+      <div x-show="error" class="px-6 py-8 text-center">
+        <div class="w-12 h-12 mx-auto mb-4 rounded-full bg-red-100 dark:bg-red-900/30 flex items-center justify-center">
+          <svg class="w-6 h-6 text-red-600 dark:text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+          </svg>
+        </div>
+        <p class="text-sm text-red-600 dark:text-red-400" x-text="error"></p>
+        <button
+          type="button"
+          @click="close()"
+          class="mt-4 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md hover:bg-gray-50 dark:hover:bg-gray-600"
+        >
+          Close
+        </button>
+      </div>
+
+      <!-- Form -->
+      <form x-show="!loading && !error" :action="executeUrl" method="post">
+        <input type="hidden" name="authenticity_token" value="<%= form_authenticity_token %>">
+
+        <div class="px-6 py-4 max-h-96 overflow-y-auto">
+          <!-- Workflow Type Badge -->
+          <template x-if="workflowType">
+            <div class="mb-4">
+              <span
+                class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium"
+                :class="{
+                  'bg-indigo-100 dark:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300': workflowType === 'pipeline',
+                  'bg-cyan-100 dark:bg-cyan-900/50 text-cyan-700 dark:text-cyan-300': workflowType === 'parallel',
+                  'bg-amber-100 dark:bg-amber-900/50 text-amber-700 dark:text-amber-300': workflowType === 'router'
+                }"
+              >
+                <template x-if="workflowType === 'pipeline'"><span class="text-base">&#8594;</span></template>
+                <template x-if="workflowType === 'parallel'"><span class="text-base">&#11124;</span></template>
+                <template x-if="workflowType === 'router'"><span class="text-base">&#9794;</span></template>
+                <span x-text="workflowType.charAt(0).toUpperCase() + workflowType.slice(1)"></span>
+              </span>
+            </div>
+          </template>
+
+          <!-- Description -->
+          <template x-if="description">
+            <p class="text-sm text-gray-600 dark:text-gray-300 mb-4" x-text="description"></p>
+          </template>
+
+          <!-- No Parameters Message -->
+          <template x-if="Object.keys(params).length === 0">
+            <div class="text-center py-4">
+              <p class="text-sm text-gray-500 dark:text-gray-400">
+                This workflow has no configurable parameters.
+              </p>
+            </div>
+          </template>
+
+          <!-- Dynamic Parameters -->
+          <template x-for="(opts, name) in params" :key="name">
+            <div class="mb-4">
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+                <span x-text="formatParamName(name)"></span>
+                <span x-show="opts.required" class="text-red-500 ml-0.5">*</span>
+              </label>
+
+              <!-- Description -->
+              <template x-if="opts.description">
+                <p class="text-xs text-gray-500 dark:text-gray-400 mb-1.5" x-text="opts.description"></p>
+              </template>
+
+              <!-- Boolean (checkbox) -->
+              <template x-if="opts.type === 'boolean' || opts.type === ':boolean'">
+                <div class="flex items-center">
+                  <input
+                    type="checkbox"
+                    :name="'workflow_params[' + name + ']'"
+                    :checked="opts.default === true"
+                    value="1"
+                    class="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 dark:border-gray-600 rounded"
+                  >
+                  <span class="ml-2 text-sm text-gray-600 dark:text-gray-400">Enable</span>
+                </div>
+              </template>
+
+              <!-- Integer -->
+              <template x-if="opts.type === 'Integer'">
+                <input
+                  type="number"
+                  :name="'workflow_params[' + name + ']'"
+                  :value="opts.default"
+                  :required="opts.required"
+                  step="1"
+                  class="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                >
+              </template>
+
+              <!-- Float -->
+              <template x-if="opts.type === 'Float'">
+                <input
+                  type="number"
+                  :name="'workflow_params[' + name + ']'"
+                  :value="opts.default"
+                  :required="opts.required"
+                  step="any"
+                  class="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                >
+              </template>
+
+              <!-- Array (JSON textarea) -->
+              <template x-if="opts.type === 'Array'">
+                <div>
+                  <textarea
+                    :name="'workflow_params[' + name + ']'"
+                    :required="opts.required"
+                    rows="3"
+                    :placeholder="'[\"item1\", \"item2\"]'"
+                    class="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 font-mono"
+                    x-text="opts.default ? JSON.stringify(opts.default) : ''"
+                  ></textarea>
+                  <p class="mt-1 text-xs text-gray-400 dark:text-gray-500">Enter as JSON array</p>
+                </div>
+              </template>
+
+              <!-- String (short text) -->
+              <template x-if="opts.type === 'String'">
+                <input
+                  type="text"
+                  :name="'workflow_params[' + name + ']'"
+                  :value="opts.default || ''"
+                  :required="opts.required"
+                  class="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                >
+              </template>
+
+              <!-- Default (textarea for potentially long text) -->
+              <template x-if="!opts.type || (opts.type !== 'boolean' && opts.type !== ':boolean' && opts.type !== 'Integer' && opts.type !== 'Float' && opts.type !== 'Array' && opts.type !== 'String')">
+                <textarea
+                  :name="'workflow_params[' + name + ']'"
+                  :required="opts.required"
+                  rows="3"
+                  class="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                  x-text="opts.default || ''"
+                ></textarea>
+              </template>
+            </div>
+          </template>
+        </div>
+
+        <!-- Warning -->
+        <div class="px-6 py-3 bg-amber-50 dark:bg-amber-900/20 border-t border-amber-100 dark:border-amber-900/30">
+          <p class="text-xs text-amber-700 dark:text-amber-300 flex items-center gap-1.5">
+            <svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+            </svg>
+            This will execute the workflow and may incur API costs for multiple agents.
+          </p>
+        </div>
+
+        <!-- Actions -->
+        <div class="flex justify-end gap-3 px-6 py-4 border-t border-gray-200 dark:border-gray-700">
+          <button
+            type="button"
+            @click="close()"
+            class="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            class="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg transition-colors"
+          >
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/>
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+            </svg>
+            Run Workflow
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<script>
+function runWorkflowModal(runUrl, executeUrl) {
+  return {
+    isOpen: false,
+    loading: false,
+    error: null,
+    runUrl: runUrl,
+    executeUrl: executeUrl,
+    workflowName: null,
+    description: null,
+    workflowType: null,
+    params: {},
+
+    async open() {
+      this.isOpen = true;
+      this.loading = true;
+      this.error = null;
+      document.body.classList.add('overflow-hidden');
+
+      try {
+        const response = await fetch(this.runUrl);
+        if (!response.ok) {
+          throw new Error('Failed to load workflow configuration');
+        }
+        const data = await response.json();
+
+        this.workflowName = data.name;
+        this.description = data.description;
+        this.workflowType = data.workflow_type;
+        this.params = data.params || {};
+      } catch (e) {
+        this.error = e.message || 'An error occurred while loading workflow configuration';
+      } finally {
+        this.loading = false;
+      }
+    },
+
+    close() {
+      this.isOpen = false;
+      document.body.classList.remove('overflow-hidden');
+    },
+
+    formatParamName(name) {
+      // Convert snake_case to Title Case
+      return name
+        .split('_')
+        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+        .join(' ');
+    }
+  }
+}
+
+// Global function to open the modal (called from Run button)
+function openRunWorkflowModal() {
+  const modal = document.querySelector('[x-data*="runWorkflowModal"]');
+  if (modal) {
+    Alpine.$data(modal).open();
+  }
+}
+</script>

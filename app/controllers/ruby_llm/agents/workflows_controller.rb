@@ -40,9 +40,76 @@ module RubyLLM
         if @workflow_class
           load_workflow_config
         end
-      rescue StandardError => e
+      rescue => e
         Rails.logger.error("[RubyLLM::Agents] Error loading workflow #{@workflow_type}: #{e.message}")
         redirect_to ruby_llm_agents.agents_path, alert: "Error loading workflow details"
+      end
+
+      # Returns workflow metadata for the run modal form
+      #
+      # Provides parameter definitions and configuration needed to build
+      # a dynamic form for executing the workflow.
+      #
+      # @return [void]
+      def run
+        @workflow_type = CGI.unescape(params[:id])
+        @workflow_class = AgentRegistry.find(@workflow_type)
+
+        unless @workflow_class
+          render json: {error: "Workflow not found"}, status: :not_found
+          return
+        end
+
+        respond_to do |format|
+          format.json do
+            render json: {
+              name: @workflow_type,
+              params: @workflow_class.respond_to?(:params) ? @workflow_class.params : {},
+              description: safe_call(@workflow_class, :description),
+              workflow_type: detect_workflow_type_kind,
+              supports_attachments: false
+            }
+          end
+        end
+      end
+
+      # Executes a workflow with the provided parameters
+      #
+      # Runs the workflow and redirects to the execution detail page on success,
+      # or back to the workflow page with an error message on failure.
+      #
+      # @return [void]
+      def execute
+        @workflow_type = CGI.unescape(params[:id])
+        @workflow_class = AgentRegistry.find(@workflow_type)
+
+        unless @workflow_class
+          flash[:alert] = "Workflow '#{@workflow_type}' not found."
+          redirect_to ruby_llm_agents.workflow_path(id: @workflow_type) and return
+        end
+
+        # Build params from form
+        workflow_params = build_workflow_params
+
+        begin
+          # Execute workflow
+          @workflow_class.call(**workflow_params)
+
+          # Find the new execution record
+          execution = Execution.by_agent(@workflow_type).order(created_at: :desc).first
+
+          if execution
+            flash[:notice] = "Workflow executed successfully!"
+            redirect_to ruby_llm_agents.execution_path(execution)
+          else
+            flash[:notice] = "Workflow executed but no execution record found."
+            redirect_to ruby_llm_agents.executions_path
+          end
+        rescue => e
+          Rails.logger.error("[RubyLLM::Agents] Workflow execution failed: #{e.message}")
+          flash[:alert] = "Execution failed: #{e.message}"
+          redirect_to ruby_llm_agents.workflow_path(id: @workflow_type)
+        end
       end
 
       private
@@ -63,9 +130,9 @@ module RubyLLM
         else
           # Fallback to execution history
           Execution.by_agent(@workflow_type)
-                   .where.not(workflow_type: nil)
-                   .pluck(:workflow_type)
-                   .first
+            .where.not(workflow_type: nil)
+            .pluck(:workflow_type)
+            .first
         end
       end
 
@@ -88,10 +155,10 @@ module RubyLLM
       # @return [void]
       def load_filter_options
         filter_data = Execution.by_agent(@workflow_type)
-                               .where.not(agent_version: nil)
-                               .or(Execution.by_agent(@workflow_type).where.not(model_id: nil))
-                               .or(Execution.by_agent(@workflow_type).where.not(temperature: nil))
-                               .pluck(:agent_version, :model_id, :temperature)
+          .where.not(agent_version: nil)
+          .or(Execution.by_agent(@workflow_type).where.not(model_id: nil))
+          .or(Execution.by_agent(@workflow_type).where.not(temperature: nil))
+          .pluck(:agent_version, :model_id, :temperature)
 
         @versions = filter_data.map(&:first).compact.uniq.sort.reverse
         @models = filter_data.map { |d| d[1] }.compact.uniq.sort
@@ -138,9 +205,7 @@ module RubyLLM
 
         # Apply time range filter with validation
         days = parse_days_param
-        scope = apply_time_filter(scope, days)
-
-        scope
+        apply_time_filter(scope, days)
       end
 
       # Loads chart data for workflow performance visualization
@@ -166,40 +231,40 @@ module RubyLLM
       def calculate_step_stats
         # Get root workflow executions
         root_executions = Execution.by_agent(@workflow_type)
-                                   .root_executions
-                                   .where("created_at > ?", 30.days.ago)
-                                   .pluck(:id)
+          .root_executions
+          .where("created_at > ?", 30.days.ago)
+          .pluck(:id)
 
         return [] if root_executions.empty?
 
         # Aggregate child execution stats by workflow_step
         child_stats = Execution.where(parent_execution_id: root_executions)
-                               .group(:workflow_step)
-                               .select(
-                                 "workflow_step",
-                                 "COUNT(*) as execution_count",
-                                 "AVG(duration_ms) as avg_duration_ms",
-                                 "SUM(total_cost) as total_cost",
-                                 "AVG(total_cost) as avg_cost",
-                                 "SUM(total_tokens) as total_tokens",
-                                 "AVG(total_tokens) as avg_tokens",
-                                 "SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END) as success_count",
-                                 "SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) as error_count"
-                               )
+          .group(:workflow_step)
+          .select(
+            "workflow_step",
+            "COUNT(*) as execution_count",
+            "AVG(duration_ms) as avg_duration_ms",
+            "SUM(total_cost) as total_cost",
+            "AVG(total_cost) as avg_cost",
+            "SUM(total_tokens) as total_tokens",
+            "AVG(total_tokens) as avg_tokens",
+            "SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END) as success_count",
+            "SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) as error_count"
+          )
 
         # Get agent type mappings for each step
         step_agent_map = Execution.where(parent_execution_id: root_executions)
-                                  .where.not(workflow_step: nil)
-                                  .group(:workflow_step)
-                                  .pluck(:workflow_step, Arel.sql("MAX(agent_type)"))
-                                  .to_h
+          .where.not(workflow_step: nil)
+          .group(:workflow_step)
+          .pluck(:workflow_step, Arel.sql("MAX(agent_type)"))
+          .to_h
 
         child_stats.map do |row|
           next if row.workflow_step.blank?
 
           execution_count = row.execution_count.to_i
           success_count = row.success_count.to_i
-          success_rate = execution_count > 0 ? (success_count.to_f / execution_count * 100).round(1) : 0
+          success_rate = (execution_count > 0) ? (success_count.to_f / execution_count * 100).round(1) : 0
 
           {
             name: row.workflow_step,
@@ -221,10 +286,10 @@ module RubyLLM
       def calculate_route_distribution
         # Get route distribution from routed_to field
         distribution = Execution.by_agent(@workflow_type)
-                                .where("created_at > ?", 30.days.ago)
-                                .where.not(routed_to: nil)
-                                .group(:routed_to)
-                                .count
+          .where("created_at > ?", 30.days.ago)
+          .where.not(routed_to: nil)
+          .group(:routed_to)
+          .count
 
         total = distribution.values.sum
         return {} if total.zero?
@@ -347,8 +412,50 @@ module RubyLLM
         return nil unless klass.respond_to?(method_name)
 
         klass.public_send(method_name)
-      rescue StandardError
+      rescue
         nil
+      end
+
+      # Builds workflow parameters from the form submission
+      #
+      # Extracts parameters from params[:workflow_params], coerces types based on
+      # the workflow's parameter definitions.
+      #
+      # @return [Hash] Symbolized parameters hash ready for workflow.call
+      def build_workflow_params
+        params_def = @workflow_class.respond_to?(:params) ? @workflow_class.params : {}
+        result = {}
+
+        params_def.each do |name, opts|
+          value = params.dig(:workflow_params, name.to_s)
+          next if value.blank? && !opts[:required]
+
+          # Type coercion
+          result[name] = coerce_param(value, opts[:type])
+        end
+
+        result.symbolize_keys
+      end
+
+      # Coerces a parameter value to the specified type
+      #
+      # @param value [String] The raw value from the form
+      # @param type [Class, Symbol, nil] The expected type
+      # @return [Object] The coerced value
+      def coerce_param(value, type)
+        case type
+        when Integer then value.to_i
+        when Float then value.to_f
+        when :boolean then value == "1" || value == "true"
+        when Array
+          begin
+            JSON.parse(value)
+          rescue JSON::ParserError
+            [value]
+          end
+        else
+          value
+        end
       end
     end
   end

@@ -50,12 +50,12 @@ module RubyLLM
         # Counts for tab badges
         @agent_count = @agents.size
         @workflow_count = @workflows.size
-      rescue StandardError => e
+      rescue => e
         Rails.logger.error("[RubyLLM::Agents] Error loading agents: #{e.message}")
         @agents = []
         @workflows = []
-        @agents_by_type = { agent: [], embedder: [], moderator: [], speaker: [], transcriber: [], image_generator: [] }
-        @workflows_by_type = { pipeline: [], parallel: [], router: [] }
+        @agents_by_type = {agent: [], embedder: [], moderator: [], speaker: [], transcriber: [], image_generator: []}
+        @workflows_by_type = {pipeline: [], parallel: [], router: []}
         @agent_count = 0
         @workflow_count = 0
         flash.now[:alert] = "Error loading agents list"
@@ -83,9 +83,76 @@ module RubyLLM
           # Only load circuit breaker status for base agents
           load_circuit_breaker_status if @agent_type_kind == "agent"
         end
-      rescue StandardError => e
+      rescue => e
         Rails.logger.error("[RubyLLM::Agents] Error loading agent #{@agent_type}: #{e.message}")
         redirect_to ruby_llm_agents.agents_path, alert: "Error loading agent details"
+      end
+
+      # Returns agent metadata for the run modal form
+      #
+      # Provides parameter definitions and configuration needed to build
+      # a dynamic form for executing the agent.
+      #
+      # @return [void]
+      def run
+        @agent_type = CGI.unescape(params[:id])
+        @agent_class = AgentRegistry.find(@agent_type)
+
+        unless @agent_class
+          render json: {error: "Agent not found"}, status: :not_found
+          return
+        end
+
+        respond_to do |format|
+          format.json do
+            render json: {
+              name: @agent_type,
+              params: @agent_class.respond_to?(:params) ? @agent_class.params : {},
+              description: safe_config_call(:description),
+              model: safe_config_call(:model),
+              supports_attachments: supports_attachments?
+            }
+          end
+        end
+      end
+
+      # Executes an agent with the provided parameters
+      #
+      # Runs the agent and redirects to the execution detail page on success,
+      # or back to the agent page with an error message on failure.
+      #
+      # @return [void]
+      def execute
+        @agent_type = CGI.unescape(params[:id])
+        @agent_class = AgentRegistry.find(@agent_type)
+
+        unless @agent_class
+          flash[:alert] = "Agent '#{@agent_type}' not found."
+          redirect_to ruby_llm_agents.agent_path(id: @agent_type) and return
+        end
+
+        # Build params from form
+        agent_params = build_agent_params
+
+        begin
+          # Execute agent
+          @agent_class.call(**agent_params)
+
+          # Find the new execution record
+          execution = Execution.by_agent(@agent_type).order(created_at: :desc).first
+
+          if execution
+            flash[:notice] = "Agent executed successfully!"
+            redirect_to ruby_llm_agents.execution_path(execution)
+          else
+            flash[:notice] = "Agent executed but no execution record found."
+            redirect_to ruby_llm_agents.executions_path
+          end
+        rescue => e
+          Rails.logger.error("[RubyLLM::Agents] Agent execution failed: #{e.message}")
+          flash[:alert] = "Execution failed: #{e.message}"
+          redirect_to ruby_llm_agents.agent_path(id: @agent_type)
+        end
       end
 
       private
@@ -113,10 +180,10 @@ module RubyLLM
       def load_filter_options
         # Single query to get all filter options (fixes N+1)
         filter_data = Execution.by_agent(@agent_type)
-                               .where.not(agent_version: nil)
-                               .or(Execution.by_agent(@agent_type).where.not(model_id: nil))
-                               .or(Execution.by_agent(@agent_type).where.not(temperature: nil))
-                               .pluck(:agent_version, :model_id, :temperature)
+          .where.not(agent_version: nil)
+          .or(Execution.by_agent(@agent_type).where.not(model_id: nil))
+          .or(Execution.by_agent(@agent_type).where.not(temperature: nil))
+          .pluck(:agent_version, :model_id, :temperature)
 
         @versions = filter_data.map(&:first).compact.uniq.sort.reverse
         @models = filter_data.map { |d| d[1] }.compact.uniq.sort
@@ -168,9 +235,7 @@ module RubyLLM
 
         # Apply time range filter with validation
         days = parse_days_param
-        scope = apply_time_filter(scope, days)
-
-        scope
+        apply_time_filter(scope, days)
       end
 
       # Loads chart data for agent performance visualization
@@ -210,7 +275,7 @@ module RubyLLM
           v1_trend: v1_trend,
           v2_trend: v2_trend
         }
-      rescue StandardError => e
+      rescue => e
         Rails.logger.debug("[RubyLLM::Agents] Version comparison error: #{e.message}")
         @version_comparison = nil
       end
@@ -345,7 +410,7 @@ module RubyLLM
       def safe_config_call(method)
         return nil unless @agent_class&.respond_to?(method)
         @agent_class.public_send(method)
-      rescue StandardError
+      rescue
         nil
       end
 
@@ -358,7 +423,11 @@ module RubyLLM
       def load_circuit_breaker_status
         return unless @agent_class.respond_to?(:reliability_config)
 
-        config = @agent_class.reliability_config rescue nil
+        config = begin
+          @agent_class.reliability_config
+        rescue
+          nil
+        end
         return unless config
 
         # Collect all models: primary + fallbacks
@@ -400,9 +469,70 @@ module RubyLLM
 
           @circuit_breaker_status[model_id] = status
         end
-      rescue StandardError => e
+      rescue => e
         Rails.logger.debug("[RubyLLM::Agents] Could not load circuit breaker status: #{e.message}")
         @circuit_breaker_status = {}
+      end
+
+      # Checks if the agent supports file attachments
+      #
+      # @return [Boolean] true if the agent accepts attachments
+      def supports_attachments?
+        return false unless @agent_class
+
+        # Check if the agent class responds to `with` or accepts attachments
+        # Base agents support attachments via the `with:` option
+        @agent_class.ancestors.any? do |ancestor|
+          ancestor.name.to_s.include?("RubyLLM::Agents::Base") ||
+            ancestor.name.to_s.include?("RubyLLM::Agents::ImageGenerator")
+        end
+      end
+
+      # Builds agent parameters from the form submission
+      #
+      # Extracts parameters from params[:agent_params], coerces types based on
+      # the agent's parameter definitions, and includes any attachments.
+      #
+      # @return [Hash] Symbolized parameters hash ready for agent.call
+      def build_agent_params
+        params_def = @agent_class.respond_to?(:params) ? @agent_class.params : {}
+        result = {}
+
+        params_def.each do |name, opts|
+          value = params.dig(:agent_params, name.to_s)
+          next if value.blank? && !opts[:required]
+
+          # Type coercion
+          result[name] = coerce_param(value, opts[:type])
+        end
+
+        # Handle attachments
+        if params[:attachments].present?
+          result[:with] = params[:attachments]
+        end
+
+        result.symbolize_keys
+      end
+
+      # Coerces a parameter value to the specified type
+      #
+      # @param value [String] The raw value from the form
+      # @param type [Class, Symbol, nil] The expected type
+      # @return [Object] The coerced value
+      def coerce_param(value, type)
+        case type
+        when Integer then value.to_i
+        when Float then value.to_f
+        when :boolean then value == "1" || value == "true"
+        when Array
+          begin
+            JSON.parse(value)
+          rescue JSON::ParserError
+            [value]
+          end
+        else
+          value
+        end
       end
     end
   end

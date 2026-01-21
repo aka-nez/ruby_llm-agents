@@ -4,8 +4,19 @@ RubyLLM::Agents::Engine.routes.draw do
   root to: "dashboard#index"
   get "chart_data", to: "dashboard#chart_data"
 
-  resources :agents, only: [:index, :show]
-  resources :workflows, only: [:show]
+  resources :agents, only: [:index, :show] do
+    member do
+      get :run
+      post :execute
+    end
+  end
+
+  resources :workflows, only: [:show] do
+    member do
+      get :run
+      post :execute
+    end
+  end
 
   resources :executions, only: [:index, :show] do
     collection do
